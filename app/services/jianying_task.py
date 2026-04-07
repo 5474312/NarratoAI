@@ -1,5 +1,6 @@
 import json
 import os
+import subprocess
 import time
 from os import path
 from loguru import logger
@@ -10,6 +11,36 @@ from app.models.schema import VideoClipParams
 from app.services import voice, clip_video, update_script
 from app.services import state as sm
 from app.utils import utils
+
+
+def get_audio_duration_ffprobe(audio_file: str) -> float:
+    """
+    使用ffprobe获取音频文件的精确时长（秒）
+    
+    Args:
+        audio_file: 音频文件路径
+        
+    Returns:
+        float: 音频时长（秒），精确到微秒
+    """
+    try:
+        cmd = [
+            'ffprobe',
+            '-v', 'error',
+            '-show_entries', 'format=duration',
+            '-of', 'csv=p=0',
+            audio_file
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        duration = float(result.stdout.strip())
+        logger.debug(f"使用ffprobe获取音频时长: {duration:.6f}秒")
+        return duration
+    except subprocess.CalledProcessError as e:
+        logger.error(f"ffprobe执行失败: {e.stderr}")
+        raise
+    except Exception as e:
+        logger.error(f"获取音频时长失败: {str(e)}")
+        raise
 
 
 def start_export_jianying_draft(task_id: str, params: VideoClipParams):
@@ -166,11 +197,18 @@ def start_export_jianying_draft(task_id: str, params: VideoClipParams):
             # 处理音频
             if item['OST'] in [0, 2]:  # 需要TTS的片段
                 if os.path.exists(audio_file):
-                    # 添加TTS音频片段
-                    # 对于音频片段，target_timerange的第二个参数是持续时间
+                    # 使用ffprobe获取精确的音频时长，避免因TTS引擎差异导致时长不匹配
+                    actual_audio_duration = get_audio_duration_ffprobe(audio_file)
+                    logger.info(f"音频文件实际时长: {actual_audio_duration:.6f}秒, 脚本时长(视频): {duration:.3f}秒")
+                    
+                    # 使用音频实际时长和视频时长中的较小值，确保不超过素材时长
+                    # 当TTS语速调整时，音频可能比视频长或短，取较小值可以避免超出素材
+                    safe_duration = min(actual_audio_duration, duration)
+                    logger.info(f"使用时长: {safe_duration:.6f}秒 (取音频和视频时长的较小值)")
+                    
                     audio_segment = AudioSegment(
                         audio_file,
-                        trange(f"{current_time}s", f"{duration}s")
+                        trange(f"{current_time}s", f"{safe_duration}s")
                     )
                     script.add_segment(audio_segment, '音频轨道')
                 else:

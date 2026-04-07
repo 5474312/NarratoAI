@@ -1,6 +1,7 @@
 import streamlit as st
 import os
 import sys
+import time
 from loguru import logger
 from app.config import config
 from webui.components import basic_settings, video_settings, audio_settings, subtitle_settings, script_settings, \
@@ -221,6 +222,45 @@ def render_generate_button():
             time.sleep(0.5)
 
 
+def get_voice_name_for_tts_engine(tts_engine: str) -> str:
+    """根据TTS引擎获取用户选择的音色"""
+    if tts_engine == 'doubaotts':
+        return st.session_state.get('voice_name', config.ui.get('doubaotts_voice_type', 'BV700_streaming'))
+    elif tts_engine == 'azure_speech':
+        return st.session_state.get('voice_name', config.ui.get('azure_voice_name', 'zh-CN-XiaoxiaoMultilingualNeural'))
+    else:
+        return st.session_state.get('voice_name', config.ui.get('edge_voice_name', 'zh-CN-XiaoxiaoNeural-Female'))
+
+
+def get_jianying_export_params() -> VideoClipParams:
+    """获取导出到剪映草稿的参数"""
+    tts_engine = st.session_state.get('tts_engine', 'azure')
+    voice_name = get_voice_name_for_tts_engine(tts_engine)
+    voice_rate = st.session_state.get('voice_rate', 1.0)
+    voice_pitch = st.session_state.get('voice_pitch', 1.0)
+    
+    return VideoClipParams(
+        video_clip_json_path=st.session_state['video_clip_json_path'],
+        video_origin_path=st.session_state['video_origin_path'],
+        tts_engine=tts_engine,
+        voice_name=voice_name,
+        voice_rate=voice_rate,
+        voice_pitch=voice_pitch,
+        n_threads=config.app.get('n_threads', 4),
+        video_aspect=VideoAspect.landscape,
+        subtitle_enabled=st.session_state.get('subtitle_enabled', False),
+        font_name=st.session_state.get('font_name', 'Microsoft YaHei'),
+        font_size=st.session_state.get('font_size', 24),
+        text_fore_color=st.session_state.get('text_fore_color', '#FFFFFF'),
+        subtitle_position=st.session_state.get('subtitle_position', 'bottom'),
+        custom_position=st.session_state.get('custom_position', 70.0),
+        tts_volume=st.session_state.get('tts_volume', 1.0),
+        original_volume=st.session_state.get('original_volume', 0.7),
+        bgm_volume=st.session_state.get('bgm_volume', 0.3),
+        draft_name=st.session_state.get('draft_name_input', f"NarratoAI_{int(time.time())}")
+    )
+
+
 def render_export_jianying_button():
     """渲染导出到剪映草稿按钮和处理逻辑"""
     import os
@@ -276,38 +316,17 @@ def render_export_jianying_button():
                 st.error("请输入草稿名称")
                 return
             
-            # 获取音频设置
-            tts_engine = st.session_state.get('tts_engine', 'azure')
-            voice_name = st.session_state.get('voice_name', 'zh-CN-YunjianNeural')
-            voice_rate = st.session_state.get('voice_rate', 1.0)
-            voice_pitch = st.session_state.get('voice_pitch', 1.0)
-            
             # 创建任务ID
             task_id = str(uuid.uuid4())
             st.session_state['task_id'] = task_id
             
             # 构建参数
-            logger.debug(f"准备创建VideoClipParams，草稿名称: '{draft_name}'")
-            params = VideoClipParams(
-                video_clip_json_path=st.session_state['video_clip_json_path'],
-                video_origin_path=st.session_state['video_origin_path'],
-                tts_engine=tts_engine,
-                voice_name=voice_name,
-                voice_rate=voice_rate,
-                voice_pitch=voice_pitch,
-                n_threads=config.app.get('n_threads', 4),
-                video_aspect=VideoAspect.landscape,
-                subtitle_enabled=st.session_state.get('subtitle_enabled', False),
-                font_name=st.session_state.get('font_name', 'Microsoft YaHei'),
-                font_size=st.session_state.get('font_size', 24),
-                text_fore_color=st.session_state.get('text_fore_color', '#FFFFFF'),
-                subtitle_position=st.session_state.get('subtitle_position', 'bottom'),
-                custom_position=st.session_state.get('custom_position', 70.0),
-                tts_volume=st.session_state.get('tts_volume', 1.0),
-                original_volume=st.session_state.get('original_volume', 0.7),
-                bgm_volume=st.session_state.get('bgm_volume', 0.3),
-                draft_name=draft_name
-            )
+            try:
+                params = get_jianying_export_params()
+            except Exception as e:
+                logger.error(f"构建参数失败: {e}")
+                st.error(f"参数构建失败: {e}")
+                return
             
             with st.spinner("正在导出到剪映草稿，请稍候..."):
                 try:
